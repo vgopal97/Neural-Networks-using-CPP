@@ -1,0 +1,631 @@
+#ifndef TENSOR_H 
+#define TENSOR_H 
+
+typedef  long double tensor_double;
+
+#define LEAK_RELU_A  (0.01)
+
+enum TensorErrorTypes
+{
+    INDEX_OUT_OF_BOUNDS,
+    TENSOR_SHAPE_NOT_MATCHING,
+    TENSOR_NOT_SCALAR,
+    TENSOR_DIMENSIONS_NOT_MATCHING,
+    TENSOR_SHAPE_IS_NULL,
+    TENSOR_SHAPE_LESS_THAN_TWO,
+    TENSOR_LAST_TWO_DIMS_MISMATCH_FOR_MAT_MUL,
+    TENSOR_NOT_MATRIX,
+    TENSOR_DIMENSIONS_OUT_OF_RANGE,
+    TENSOR_TOTAL_ERROR_COUNT,
+};
+
+const char* TensorErrorType[TENSOR_TOTAL_ERROR_COUNT + 1] = 
+{
+    "INDEX_OUT_OF_BOUNDS",
+    "TENSOR_SHAPE_NOT_MATCHING",
+    "TENSOR_NOT_SCALAR",
+    "TENSOR_DIMENSIONS_NOT_MATCHING",
+    "TENSOR_SHAPE_IS_NULL",
+    "TENSOR_SHAPE_LESS_THAN_TWO",
+    "TENSOR_LAST_TWO_DIMS_MISMATCH_FOR_MAT_MUL",
+    "TENSOR_NOT_MATRIX",
+    "TENSOR_DIMENSIONS_OUT_OF_RANGE",
+    "TENSOR_TOTAL_ERROR_COUNT",
+};
+
+class tensor
+{
+    private:
+        int num_elems;
+        int num_dims;
+        int data_iter = 0;
+        std::vector<int> t_shape;
+
+    template<typename T>
+    void _add_elems(const std::vector<T>& vec, int cur_dim)
+    {
+
+        if constexpr (std::is_same<T, tensor_double>::value)
+        {
+            for (int i = 0; i < t_shape[cur_dim]; i++)
+            {
+                data[data_iter++] = vec[i];
+            }
+        }
+        else
+        {
+            for (int i = 0; i < t_shape[cur_dim]; i++)
+            {
+                int total_elems = 1;
+                _add_elems(vec[i], cur_dim + 1);
+            }
+        }
+    }
+
+        template<typename T>
+        void pop_front(std::vector<T>& vec)
+        {
+            try
+            {
+                if(vec.empty())
+                {
+                    throw TENSOR_SHAPE_IS_NULL;
+                }
+            }
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+                return;
+            }
+            
+            vec.front() = std::move(vec.back());
+            vec.pop_back();
+        }
+
+        bool shape_equal(std::vector<int>& a, std::vector<int>& b)
+        {
+            if(a.size() != b.size())
+            {
+                return false;
+            }
+
+            for(int i=0; i<a.size(); i++)
+            {
+                if(a[i] != b[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        std::vector<int> calc_dims_for_matmul(std::vector<int>& A, std::vector<int>& B)
+        {
+            std::vector<int> res;
+            int dims = A.size();
+            res.assign(B.begin(), B.end());
+            res[dims-2] = A[dims-2];
+            return res;
+        }
+
+        bool broadcastable(std::vector<int> target, std::vector<int> src)
+        {
+            if(target.size() != src.size())
+            {
+                return false;
+            }
+
+            for(int i=0; i<target.size(); i++)
+            {
+                if((src[i] != target[i]) && (src[i] > 1))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+         void broadcast(tensor res, tensor A, int dim)
+        {
+            if(dim != this->t_shape.size()-1)
+            {
+                for(int i=0; i<this->get_shape()[dim]; i++)
+                {
+                    broadcast(res[i], A[A.get_shape()[dim] > 1 ? i : 0], dim+1);
+                }
+            }
+
+            if(res.get_shape()[0] != this->t_shape[dim])
+            {
+                for(int i=0; i<res.get_shape()[dim]; i++)
+                {
+                    res[i] = A[0];
+                }
+            }
+        }
+
+        tensor_double random_float(tensor_double min, tensor_double max) {
+            return ((tensor_double)rand() / RAND_MAX) * (max - min) + min;
+        }
+
+    public:
+        tensor_double* data = NULL;
+        bool is_reference = false;
+
+        /* Constructor*/
+        tensor()
+        {
+            
+        }
+       
+        /* For a zero tensor initialization*/
+        tensor(const std::vector<int>& shape)
+        {
+            num_elems = std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
+            num_dims = shape.size();
+            t_shape = shape;
+            if(data)
+            {
+                free(data);
+            }
+#ifdef DEBUG_LOGS
+            //std::cout<<"num_elems: "<<num_elems<<std::endl;
+#endif
+            data = (tensor_double*)malloc(sizeof(tensor_double)*num_elems);
+        }
+
+        /*converting nested vector into a tensor. Nested vector, along with shape as params*/
+         template<typename T> tensor(std::vector<T>& vec, std::vector<int> shape)
+        {
+            num_elems = std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
+            num_dims = shape.size();
+            t_shape = shape;
+            data = (tensor_double*)malloc(sizeof(tensor_double)*num_elems);
+            _add_elems(vec, 0);
+        }
+
+        tensor(tensor_double* p_data, std::vector<int>& shape)
+        {
+            if(shape.empty())
+            {
+                num_elems = 1;
+                num_dims = 1;
+                t_shape = std::vector<int>(1,1);
+            }
+            else
+            {
+                num_elems = std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<int>());
+                num_dims = shape.size();
+                t_shape = shape;
+            }
+            is_reference = true;
+            data = p_data;
+        }
+
+        tensor(const tensor& A)
+        {
+            this->t_shape = A.t_shape;
+            this->num_elems = A.num_elems;
+            this->num_dims = A.num_dims;
+            this->data = (tensor_double*) malloc(sizeof(tensor_double)*num_elems);
+            for(int i=0; i<num_elems; i++)
+            {
+                data[i] = A.data[i];
+            }
+        }
+        
+        /* Destructor*/
+        ~tensor()
+        {
+            if(!(this->is_reference) && data)
+            {
+#ifdef DEBUG_LOGS
+                //std::cout<<"Tensor Destructed! Addr:"<<this<<std::endl;
+#endif
+                free(data);
+                data = NULL;
+            }
+        }
+
+        /* Shape Function*/
+        std::vector<int> get_shape()
+        {
+            if(this->t_shape.empty())
+            {
+                return std::vector<int>{};
+            }
+            return t_shape;
+        }
+
+        int get_elem_count()
+        {
+            return this->num_elems;
+        }
+
+        tensor_double val()
+        {
+            try
+            {
+                if(num_elems > 1)
+                {
+                    std::cout<<num_elems<<std::endl;
+                    throw TENSOR_NOT_SCALAR;
+                }
+            }
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+                return 0;
+            }
+            
+            return data[0];
+        }
+
+        void print_shape()
+        {
+            std::cout<<"(";
+            for(int i=0; i<this->num_dims; i++)
+            {
+                std::cout<<this->t_shape[i]<<", ";
+            }
+            std::cout<<")"<<std::endl;
+        }
+
+        /* = operator overloading*/
+        void operator=(tensor A)
+        {
+            if(this->is_reference)
+            {
+                try
+                {
+                    if(!shape_equal(t_shape, A.t_shape))
+                    {
+                        throw TENSOR_SHAPE_NOT_MATCHING;
+                    }
+                }
+                catch(TensorErrorTypes x)
+                {
+                    std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                    exit(0);
+                    return;
+                }
+                
+                for(int i=0; i < num_elems; i++)
+                {
+                    data[i] = A.data[i];
+                }
+                return;
+            }
+
+            t_shape = A.t_shape;
+            num_elems = A.num_elems;
+            num_dims = A.num_dims;
+            if(data)
+            {
+                free(data);
+                data = NULL;
+            }
+            data = (tensor_double*) malloc(sizeof(tensor_double)*num_elems);
+            
+            for(int i=0; i<num_elems; i++)
+            {
+                data[i] = A.data[i];
+            }
+        }
+
+        /* [] Operator overloading*/
+        tensor operator[](int i)
+        {
+            try
+            {
+                if(i >= t_shape[0])
+                {
+                    throw INDEX_OUT_OF_BOUNDS;
+                }
+            }
+
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
+                    
+            std::vector<int> sub_tensor_shape = t_shape;
+            pop_front(sub_tensor_shape);
+            tensor sub_tensor(&(data[i*std::accumulate(sub_tensor_shape.begin(), sub_tensor_shape.end(), 1, std::multiplies<int>())]), sub_tensor_shape);
+            return sub_tensor;
+        } 
+
+        /* + operator overloading*/
+        tensor operator+(tensor A)
+        {
+            tensor res(t_shape);
+            bool is_broadcast = false;
+            try
+                {
+                    if(!shape_equal(t_shape, A.t_shape))
+                    {
+                        throw TENSOR_SHAPE_NOT_MATCHING;
+                    }
+                }
+                catch(TensorErrorTypes x)
+                {
+                    if(broadcastable(this->t_shape, A.get_shape()))
+                    {
+                        is_broadcast = true;
+                        broadcast(res, A, 0);
+                    }
+                    else
+                    {
+                        std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                        exit(0);
+                    }
+                }
+
+                for(int i=0; i<this->num_elems; i++)
+                {
+                    res.data[i] = this->data[i] + (is_broadcast ? res.data[i] : A.data[i]);
+                }
+
+            return res;
+        }
+
+        /* - operator overloading*/
+        tensor operator-(tensor A)
+        {
+            tensor res(t_shape);
+            bool is_broadcast = false;
+            try
+                {
+                    if(!shape_equal(t_shape, A.t_shape))
+                    {
+                        throw TENSOR_SHAPE_NOT_MATCHING;
+                    }
+                }
+                catch(TensorErrorTypes x)
+                {
+                    if(broadcastable(this->t_shape, A.get_shape()))
+                    {
+                        is_broadcast = true;
+                        broadcast(res, A, 0);
+                    }
+                    else
+                    {
+                        std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                        exit(0);
+                    }
+                }
+
+                for(int i=0; i<this->num_elems; i++)
+                {
+                    res.data[i] = this->data[i] - (is_broadcast ? res.data[i] : A.data[i]);
+                }
+
+            return res;
+        }
+
+        void operator+=(tensor A)
+        {
+            (*this) = (*this) + A;
+        }
+
+        void operator-=(tensor A)
+        {
+            (*this) = (*this) - A;
+        }
+
+        /* * operator overloading*/
+        tensor operator*(tensor A)
+        {
+            /* Throw error if the dimesnions are less than 2 and 
+               also if both the dimesnions are not compatible*/
+            
+            try
+            {
+                if(num_dims < 2)
+                {
+                    throw TENSOR_SHAPE_LESS_THAN_TWO;
+                }
+
+                if(this->num_dims != A.num_dims)
+                {
+                    throw TENSOR_SHAPE_NOT_MATCHING;
+                }
+
+                if(this->t_shape.back() != A.t_shape[A.num_dims-2])
+                {
+                    throw TENSOR_LAST_TWO_DIMS_MISMATCH_FOR_MAT_MUL;
+                }
+            }
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+                return tensor();
+            }
+
+            tensor res(calc_dims_for_matmul(this->t_shape, A.t_shape));
+
+            if(this->num_dims > 2)
+            {
+                for(auto i=0; i<this->t_shape[0]; i++)
+                {
+                    res[i] = (*this)[i] * A[i];
+                }
+            }
+            else
+            {
+                /* Do the matrix multiplication */
+                for(auto r=0; r<res.t_shape[0]; r++)
+                {
+                    for(auto c=0; c<A.t_shape[1]; c++)
+                    {
+                        res.data[r*res.t_shape[1] + c] = 0;
+                       for(auto k=0; k<this->t_shape[1]; k++)
+                       {
+#ifdef DEBUG_LOGS
+                            //std::cout<<r<<", "<<c<<std::endl;
+                            //std::cout<<r<<", "<<c<<", "<<k<<std::endl;
+#endif
+                            res.data[r*res.t_shape[1] + c] += (*this)[r][k].val() * A[k][c].val();
+                       }
+                    }
+                }
+            }
+
+            return res;
+        }
+
+        tensor operator*(double n)
+        {
+            tensor res(t_shape);
+            for(int i=0; i<num_elems; i++)
+            {
+                res.data[i] = this->data[i]*n;
+            }
+
+            return res;
+        }
+
+
+        tensor operator/(tensor_double n)
+        {
+            tensor res(t_shape);
+            for(int i=0; i<num_elems; i++)
+            {
+                res.data[i] = this->data[i]/n;
+            }
+
+            return res;
+        }
+
+         void operator*=(tensor A)
+        {
+            (*this) = (*this) * A;
+        }
+
+         void operator*=(tensor_double A)
+        {
+            (*this) = (*this) * A;
+        }
+
+        void operator/=(tensor_double A)
+        {
+            (*this) = (*this) / A;
+        }
+
+        tensor relu()
+        {
+            tensor res(this->t_shape);
+            for(int i=0; i<this->num_elems; i++)
+            {
+                res.data[i] = this->data[i] > 0 ? this->data[i] : (LEAK_RELU_A * this->data[i]);
+            }
+
+            return res;
+        }
+
+        int elem_count()
+        {
+            return this->num_elems;
+        }
+
+        tensor transpose()
+        {
+            try
+            {
+                if(this->num_dims != 2)
+                {
+                    throw TENSOR_NOT_MATRIX;
+                }
+            }
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
+
+            tensor res(std::vector<int>{this->t_shape[1], this->t_shape[0]});
+
+            for(int i=0; i<res.t_shape[0]; i++)
+            {
+                for(int j=0; j<res.t_shape[1]; j++)
+                {
+                    res.data[i*(res.t_shape[1]) + j] = (*this)[j][i].val();
+                }
+            }
+            
+            return res;
+        }
+
+        tensor avg()
+        {
+            try
+            {
+                if(this->num_dims == 1)
+                {
+                    throw TENSOR_DIMENSIONS_OUT_OF_RANGE;
+                }
+            }
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
+
+            std::vector<int> new_dims(this->t_shape);
+            int dims = this->t_shape[0];
+            new_dims[0] = 1;
+            tensor res(new_dims);
+            for(int i=0; i<dims; i++)
+            {
+                res[0] += (*this)[i];
+            }
+            
+            return res/dims;
+        }
+
+        tensor_double sum()
+        {
+            tensor_double res = 0;
+
+            for(int i=0; i<this->get_elem_count(); i++)
+            {
+                res += this->data[i];
+            }
+
+            return res;
+        }
+
+        tensor one_hot_encoding(int num_classes)
+        {
+            auto new_shape = this->t_shape;
+            new_shape[1] = num_classes;
+
+            tensor Y_encoded = tensor(new_shape);
+
+            for(int i=0; i<new_shape[0]; i++)
+            {
+                Y_encoded[i][(int)((*this)[i][0].val())].data[0] = 1;
+            }
+
+            return Y_encoded;
+        }
+
+        void randomize()
+        {
+            for(auto i=0; i<this->num_elems; i++)
+            {
+                this->data[i] = random_float(-10, 10);
+            }
+        }
+
+        /* Reference and dereferencing overloading as required */
+
+        /* Reshape Fucntion*/
+};
+#endif
