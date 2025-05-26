@@ -395,20 +395,22 @@ class SoftMax : public Module
 #ifdef DEBUG_LOGS
             std::cout<<std::endl;
 #endif
-
-            for(auto i=0; i<x[0].get_elem_count(); i++)
-            {
-                res[b].data[i] = res[b].data[i]/sum;
-            }
-
+            res[b] = res[b]/sum;
         }
-        this->A = A;
         return res;
     }
 
     /* A`(x) = A(x)*(1-A(x)) */
     tensor backward(tensor A)
     {
+        tensor res(A.get_shape());
+        for(int b=0; b<res.get_shape()[0]; b++)
+        {
+            for(int i=0 ;i<res.get_shape()[1]; i++)
+            {
+                res[b].data[i] = this->A[b].data[i] * ( 1 - this->A[b].data[i]);
+            }
+        }
         return A;
     }
 
@@ -598,7 +600,7 @@ class cross_entropy_loss
 
         for(int b=0; b<batch_size; b++)
         {
-            res[b].data[0] = (-1) * std::log(y_pred[b][])
+            res[b].data[0] = (-1) * std::log(y_pred[b][(int) y[b].val()].val() );
         }
 
         return res;
