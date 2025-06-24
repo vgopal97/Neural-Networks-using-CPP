@@ -383,10 +383,17 @@ class SoftMax : public Module
 
         for(auto b=0; b<x.get_shape()[0]; b++)
         {
+            /* Find the maximum in the tensor*/
+            tensor_double max_elem = x[b][0].val();
+            for(auto i=1; i<x[0].get_elem_count(); i++)
+            {
+                max_elem = x[b][i].val() > max_elem ? x[b][i].val() : max_elem;
+            }
+
             sum = 0;
             for(auto i=0; i<x[0].get_elem_count(); i++)
             {
-                res[b].data[i] = std::pow(2.71, x[b].data[i]);
+                res[b].data[i] = std::pow(2.71, x[b].data[i] - max_elem);
 #ifdef DEBUG_LOGS
                 std::cout<<res[b].data[i]<<", ";
 #endif
@@ -453,6 +460,18 @@ class Network : public Module
 #ifdef DEBUG_LOGS
             std::cout<<(this->mod_list[i])->get_mod_type()<<", is ref: "<<dLdZ.is_reference<<std::endl;
 #endif
+            try
+            {
+                if(dLdZ.isInf())
+                {
+                    throw TENSOR_VALUES_INF_NAN;
+                }
+            }
+            catch(FunctionalityErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
             dLdZ = (this->mod_list[i])->backward(dLdZ);
         }
         return dLdZ;
@@ -581,7 +600,7 @@ class cross_entropy_loss
 
     public:
 
-    cross_entropy_loss(int output_dim, Network* NN)
+    cross_entropy_loss(Network* NN, int output_dim)
     {
         this->output_dim = output_dim;
         this->NN = NN;

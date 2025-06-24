@@ -1,9 +1,9 @@
 #include <iostream>
-#include<vector>
-#include<algorithm>
-#include<random>
-#include<numeric>
-#include<string>
+#include <vector>
+#include <algorithm>
+#include <random>
+#include <numeric>
+#include <string>
 #include <fstream>
 
 #include "tensor.h"
@@ -18,14 +18,17 @@ int main()
     int epochs = 100;
     int batch_size = 4;
     double learning_rate = 0.01;
+    int hidden_dim = 16;
     int output_dim = 3;
     int iters = 0;
 
     /* Prepare the model */
     Network NN(batch_size);
-    NN.add_linear(4, output_dim);
+    NN.add_linear(4, hidden_dim);
     NN.add_relu();
-    normal_loss LOSS(&NN, output_dim);
+    NN.add_linear(hidden_dim, output_dim);
+    NN.add_softmax();
+    cross_entropy_loss LOSS(&NN, output_dim);
 
     /* Iris Dataset Handling */
     std::string myText;
@@ -83,12 +86,27 @@ int main()
             NN.update_weights(learning_rate);
 
             /* Do the forward propogation on dev data */
-            y_pred = NN.forward(x_dev);
-            auto dev_loss = LOSS.forward(y_dev, y_pred);
+            auto dev_y_pred = NN.forward(x_dev);
+            auto dev_loss = LOSS.forward(y_dev, dev_y_pred);
+
+            try 
+            {
+                if(dev_y_pred.isInf())
+                {
+                    throw TENSOR_VALUES_INF_NAN;
+                }
+
+            }
+
+            catch(FunctionalityErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
 
             if(iter % 3 == 0)
             {
-                std::cout<<"Epoch: "<<epoch<<", Iteration: "<<iter<<", Train Loss: "<<train_loss<<", Dev Loss: "<<dev_loss<<std::endl;
+                std::cout<<"Epoch: "<<epoch<<", Iteration: "<<iter<<", Train Loss: "<<train_loss.avg().val()<<", Dev Loss: "<<dev_loss.avg().val()<<std::endl;
             }
 
             /* Update the train and dev dataset */

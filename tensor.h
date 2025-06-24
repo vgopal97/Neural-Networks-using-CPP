@@ -16,6 +16,7 @@ enum TensorErrorTypes
     TENSOR_LAST_TWO_DIMS_MISMATCH_FOR_MAT_MUL,
     TENSOR_NOT_MATRIX,
     TENSOR_DIMENSIONS_OUT_OF_RANGE,
+    TENSOR_VALUES_INF_NAN,
     TENSOR_TOTAL_ERROR_COUNT,
 };
 
@@ -30,6 +31,7 @@ const char* TensorErrorType[TENSOR_TOTAL_ERROR_COUNT + 1] =
     "TENSOR_LAST_TWO_DIMS_MISMATCH_FOR_MAT_MUL",
     "TENSOR_NOT_MATRIX",
     "TENSOR_DIMENSIONS_OUT_OF_RANGE",
+    "TENSOR_VALUES_INF_NAN",
     "TENSOR_TOTAL_ERROR_COUNT",
 };
 
@@ -79,8 +81,8 @@ class tensor
                 return;
             }
             
-            vec.front() = std::move(vec.back());
-            vec.pop_back();
+            // Might have performance impact
+            vec.erase(vec.begin());
         }
 
         bool shape_equal(std::vector<int>& a, std::vector<int>& b)
@@ -252,11 +254,13 @@ class tensor
                 if(num_elems > 1)
                 {
                     std::cout<<num_elems<<std::endl;
+                    this->print_shape();
                     throw TENSOR_NOT_SCALAR;
                 }
             }
             catch(TensorErrorTypes x)
             {
+                std::cout<<num_elems<<std::endl;
                 std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
                 exit(0);
                 return 0;
@@ -622,6 +626,20 @@ class tensor
             {
                 this->data[i] = random_float(-10, 10);
             }
+        }
+
+        bool isInf()
+        {
+            for(auto i=0; i<this->num_elems; i++)
+            {
+                if(std::isinf(this->data[i]))
+                {
+                    std::cout<<"Caught Nan/Inf value "<<this->data[i]<<std::endl;
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /* Reference and dereferencing overloading as required */
