@@ -6,18 +6,18 @@
 #include <string>
 #include <fstream>
 
+#define PYTORCH_IMPLEMENTATION_CROSS_ENTROPY
 #include "tensor.h"
 #include "functionality.h"
 //#define DEBUG_LOGS
-
 // Compilation Command g++ -std=c++17 -g -fsanitize=address iris.cpp -o iris
 
 int main()
 {
     /* Configurations */
-    int epochs = 100;
-    int batch_size = 4;
-    double learning_rate = 0.01;
+    int epochs = 1000;
+    int batch_size = 16;
+    double learning_rate = 1e-2;
     int hidden_dim = 16;
     int output_dim = 3;
     int iters = 0;
@@ -25,10 +25,10 @@ int main()
     /* Prepare the model */
     Network NN(batch_size);
     NN.add_linear(4, hidden_dim);
-    NN.add_relu();
+    //NN.add_relu(0.01);
+    NN.add_tanh();
     NN.add_linear(hidden_dim, output_dim);
-    NN.add_softmax();
-    cross_entropy_loss LOSS(&NN, output_dim);
+    CrossEntropy LOSS(output_dim);
 
     /* Iris Dataset Handling */
     std::string myText;
@@ -64,10 +64,11 @@ int main()
 
     MyReadFile.close();
 
-    Dataset iris_dataset(batch_size, X, Y);
+    Dataset iris_dataset(batch_size, X, Y, 12, 2, 1);
     iters = X.size() / batch_size + 1;
     for(int epoch=0; epoch<epochs; epoch++)
     {
+        tensor_double acc = 0.0;
         for(auto iter = 0; iter < iters; iter++)
         {
             /* get the train and dev data */
@@ -88,25 +89,38 @@ int main()
             /* Do the forward propogation on dev data */
             auto dev_y_pred = NN.forward(x_dev);
             auto dev_loss = LOSS.forward(y_dev, dev_y_pred);
+            acc += accuracy(dev_y_pred, y_dev);
 
-            try 
+            try
             {
-                if(dev_y_pred.isInf())
+                if(std::isnan(train_loss) || std::isinf(train_loss) || std::isnan(dev_loss) || std::isinf(dev_loss) || backprop.invalid())
                 {
-                    throw TENSOR_VALUES_INF_NAN;
+                    throw NAN_INF_VALUES_FOUND;
                 }
-
             }
-
             catch(FunctionalityErrorTypes x)
             {
-                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                std::cout<<"Epoch: "<<epoch<<", Iteration: "<<iter<<", Train Loss: "<<train_loss<<", Dev Loss: "<<dev_loss<<", acc: "<<acc/iters<<std::endl;
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<FunctionalityErrorType[x]<<std::endl;
                 exit(0);
-            }
+            }    
 
-            if(iter % 3 == 0)
-            {
-                std::cout<<"Epoch: "<<epoch<<", Iteration: "<<iter<<", Train Loss: "<<train_loss.avg().val()<<", Dev Loss: "<<dev_loss.avg().val()<<std::endl;
+            if(iter%iters == iters-1)
+            {   
+#ifdef DEBUG_LOGS
+                auto predictions = dev_y_pred.argmax();
+                for(int i=0; i<batch_size; i++)
+                {
+                    std::cout<<"Logits : ";
+                    for(int j=0; j<dev_y_pred[i].get_shape()[0]; j++)
+                    {
+                        std::cout<<dev_y_pred[i][j].val()<<",\t\t";
+                    }
+                    std::cout<<"Prediction : "<<predictions[i].val()<<",\t\t";
+                    std::cout<<"Original : "<<y_dev[i].val()<<std::endl;
+                }
+#endif
+                std::cout<<"Epoch: "<<epoch<<", Iteration: "<<iter<<", Train Loss: "<<train_loss<<", Dev Loss: "<<dev_loss<<", acc: "<<acc/iters<<std::endl;
             }
 
             /* Update the train and dev dataset */

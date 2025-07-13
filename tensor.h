@@ -111,7 +111,7 @@ class tensor
             res[dims-2] = A[dims-2];
             return res;
         }
-
+#ifdef BROADCAST_ENABLED
         bool broadcastable(std::vector<int> target, std::vector<int> src)
         {
             if(target.size() != src.size())
@@ -132,7 +132,7 @@ class tensor
 
          void broadcast(tensor res, tensor A, int dim)
         {
-            if(dim != this->t_shape.size()-1)
+            if(dim != this->num_dims-1)
             {
                 for(int i=0; i<this->get_shape()[dim]; i++)
                 {
@@ -140,7 +140,7 @@ class tensor
                 }
             }
 
-            if(res.get_shape()[0] != this->t_shape[dim])
+            if(res.get_shape()[0] != A.t_shape[dim])
             {
                 for(int i=0; i<res.get_shape()[dim]; i++)
                 {
@@ -148,6 +148,7 @@ class tensor
                 }
             }
         }
+#endif
 
         tensor_double random_float(tensor_double min, tensor_double max) {
             return ((tensor_double)rand() / RAND_MAX) * (max - min) + min;
@@ -321,6 +322,24 @@ class tensor
             }
         }
 
+        void operator=(tensor_double x)
+        {
+            try
+            {
+                if(this->num_elems != 1 && this->num_dims!=1)
+                {
+                    throw TENSOR_NOT_SCALAR;
+                }
+            }
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
+
+            this->data[0] = x;
+        }
+
         /* [] Operator overloading*/
         tensor operator[](int i)
         {
@@ -348,8 +367,10 @@ class tensor
         tensor operator+(tensor A)
         {
             tensor res(t_shape);
+#ifdef BROADCAST_ENABLED
             bool is_broadcast = false;
-            try
+#endif
+                try
                 {
                     if(!shape_equal(t_shape, A.t_shape))
                     {
@@ -358,21 +379,30 @@ class tensor
                 }
                 catch(TensorErrorTypes x)
                 {
+#ifdef BROADCAST_ENABLED
                     if(broadcastable(this->t_shape, A.get_shape()))
                     {
                         is_broadcast = true;
-                        broadcast(res, A, 0);
+                        broadcast(res, 0);
                     }
                     else
                     {
                         std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
                         exit(0);
                     }
+#else
+                    std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                    exit(0);
+#endif
                 }
 
                 for(int i=0; i<this->num_elems; i++)
                 {
+#ifdef BROADCAST_ENABLED
                     res.data[i] = this->data[i] + (is_broadcast ? res.data[i] : A.data[i]);
+#else
+                     res.data[i] = this->data[i] +  A.data[i];
+#endif
                 }
 
             return res;
@@ -382,7 +412,9 @@ class tensor
         tensor operator-(tensor A)
         {
             tensor res(t_shape);
+#ifdef BROADCAST_ENABLED
             bool is_broadcast = false;
+#endif
             try
                 {
                     if(!shape_equal(t_shape, A.t_shape))
@@ -392,6 +424,7 @@ class tensor
                 }
                 catch(TensorErrorTypes x)
                 {
+#ifdef BROADCAST_ENABLED
                     if(broadcastable(this->t_shape, A.get_shape()))
                     {
                         is_broadcast = true;
@@ -402,11 +435,19 @@ class tensor
                         std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
                         exit(0);
                     }
+#else
+                    std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                     exit(0);
+#endif
                 }
 
                 for(int i=0; i<this->num_elems; i++)
                 {
+#ifdef BROADCAST_ENABLED
                     res.data[i] = this->data[i] - (is_broadcast ? res.data[i] : A.data[i]);
+#else
+                    res.data[i] = this->data[i] - A.data[i];
+#endif
                 }
 
             return res;
@@ -522,12 +563,12 @@ class tensor
             (*this) = (*this) / A;
         }
 
-        tensor relu()
+        tensor relu(tensor_double leak_val)
         {
             tensor res(this->t_shape);
             for(int i=0; i<this->num_elems; i++)
             {
-                res.data[i] = this->data[i] > 0 ? this->data[i] : (LEAK_RELU_A * this->data[i]);
+                res.data[i] = this->data[i] > 0.0 ? this->data[i] : (this->data[i] * leak_val);
             }
 
             return res;
@@ -620,11 +661,16 @@ class tensor
             return Y_encoded;
         }
 
-        void randomize()
+        void randomize(int size)
         {
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            tensor_double stddev = sqrt(2.0f / size);
+            std::normal_distribution<tensor_double> normal_dist(0.0f, stddev);
+
             for(auto i=0; i<this->num_elems; i++)
             {
-                this->data[i] = random_float(-10, 10);
+                this->data[i] = normal_dist(gen);
             }
         }
 
@@ -642,6 +688,70 @@ class tensor
             return false;
         }
 
+        tensor argmax()
+        {
+            tensor res;
+
+            if(this->num_dims > 1)
+            {
+                auto r_shape = this->get_shape();
+                r_shape.pop_back();
+                res = tensor(r_shape);
+                for(int i=0; i < this->get_shape()[0]; i++)
+                {
+                    res[i] = (*this)[i].argmax();
+                } 
+            }
+            else
+            {
+                res = tensor(std::vector<int>{1});
+                int max = 0;
+                for(int i=1; i<this->elem_count(); i++)
+                {
+                    max = (*this)[max].val() < (*this)[i].val() ? i : max;
+                }
+                res.data[0] = max;
+            }
+
+            return res;
+        }
+
+        tensor_double max()
+        {
+            tensor_double max_elem = this->data[0];
+
+            for(int i=1; i<this->get_elem_count(); i++)
+            {
+                max_elem = (this->data[i] > max_elem) ? this->data[i] : max_elem;
+            }
+            return max_elem;
+        }
+
+        bool invalid()
+        {
+            for(int i=0; i<this->get_elem_count(); i++)
+            {
+                if(std::isnan(this->data[i]) || std::isinf(this->data[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        
+        tensor extend(int n)
+        {
+            auto res_shape = this->get_shape();
+            res_shape[0] = n;
+            tensor res = tensor(res_shape);
+            for(int i=0; i<n; i++)
+            {
+                res[i] = (*this)[0];
+            }
+
+            return res;
+        }
         /* Reference and dereferencing overloading as required */
 
         /* Reshape Fucntion*/

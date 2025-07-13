@@ -11,6 +11,8 @@ enum FunctionalityErrorTypes
 {
     LAYER_DIMS_MISMATCH,
     NO_WEIGHTS_BEFORE_ACTIVATION,
+    NAN_INF_VALUES_FOUND,
+    NEGATIVE_VALUE_FOR_LOG_ERROR,
     FUNCTIONALITY_TOTAL_ERROR_COUNT,
 };
 
@@ -18,6 +20,8 @@ const char* FunctionalityErrorType[FUNCTIONALITY_TOTAL_ERROR_COUNT + 1] =
 {
     "LAYER_DIMS_MISMATCH",
     "NO_WEIGHTS_BEFORE_ACTIVATION",
+    "NAN_INF_VALUES_FOUND",
+    "NEGATIVE_VALUE_FOR_LOG_ERROR",
     "FUNCTIONALITY_TOTAL_ERROR_COUNT",
 };
 
@@ -31,6 +35,21 @@ tensor unit_tensor(std::vector<int> shape)
     }
 
     return res;
+}
+
+tensor_double accuracy(tensor y_pred, tensor y)
+{
+    auto predictions = y_pred.argmax();
+    int correct = 0;
+    for(int i=0; i<y.get_shape()[0]; i++)
+    {
+        if((int)(predictions[i].val()) == (int)(y[i][0].val()))
+        {
+            correct++;
+            //std::cout<<"correct"<<std::endl;
+        }
+    }
+    return (tensor_double)(correct)/y_pred.get_shape()[0];
 }
 
 class Dataset
@@ -56,7 +75,7 @@ class Dataset
     public:
     std::vector<tensor_double> temp_train_y;
     std::vector<std::vector<tensor_double> > temp_train_x;
-    Dataset(int batch_size, std::vector< std::vector<tensor_double> > X, std::vector<tensor_double> Y)
+    Dataset(int batch_size, std::vector< std::vector<tensor_double> > X, std::vector<tensor_double> Y, int split_train, int split_dev, int split_test)
     {
         this->X = X;
         this->Y = Y;
@@ -67,17 +86,26 @@ class Dataset
         
         std::random_device rd;
         std::mt19937 g(rd());
-        std::mt19937 f(g());
-        std::shuffle(X.begin(), X.end(), f);
-        std::shuffle(Y.begin(), Y.end(), f);
+        std::mt19937 fx(g());
+        auto fy = fx;
+        std::shuffle(X.begin(), X.end(), fx);
+        std::shuffle(Y.begin(), Y.end(), fy);
 
-        /* Slice the dataset to train, dev and test with 10:2:3 ratio */
-        this->train_x = std::vector< std::vector<tensor_double> >(X.begin(), X.begin() + 100);
-        this->train_y = std::vector<tensor_double>(Y.begin(), Y.begin() + 100);
-        this->dev_x = std::vector< std::vector<tensor_double> >(X.begin() + 101, X.begin() + 120);
-        this->dev_y = std::vector<tensor_double>(Y.begin() + 101, Y.begin() + 120);
-        this->test_x = std::vector< std::vector<tensor_double> >(X.begin() + 121, X.end());
-        this->test_y = std::vector<tensor_double>(Y.begin() + 121, Y.end());
+        /* Slice the dataset to train, dev and test with 13:2:0 ratio */
+        int total = (split_train + split_dev + split_test);
+        int num_train = (split_train * this->size) / total;
+        int num_dev = (split_dev * this->size) / total;
+
+        std::cout<<"Dataset split : num_train: "<<num_train<<", num_dev: "<<num_dev<<", num_test: "<<this->size-num_train-num_dev<<", total_size: "<<this->size<<std::endl;
+
+        this->train_x = std::vector< std::vector<tensor_double> >(X.begin(), X.begin() + num_train);
+        this->train_y = std::vector<tensor_double>(Y.begin(), Y.begin() + num_train);
+
+        this->dev_x = std::vector< std::vector<tensor_double> >(X.begin() + num_train, X.begin() + num_train + num_dev);
+        this->dev_y = std::vector<tensor_double>(Y.begin() + num_train, Y.begin() + num_train + num_dev);
+
+        this->test_x = std::vector< std::vector<tensor_double> >(X.begin() + num_train + num_dev, X.end());
+        this->test_y = std::vector<tensor_double>(Y.begin() + num_train + num_dev, Y.end());
         
         /* Populate the initial tensor values*/
         this->next(TRAIN);
@@ -93,6 +121,12 @@ class Dataset
 
         if(mode == TRAIN)
         {
+            /*
+            std::random_device rd;
+            std::mt19937 g(rd());
+            std::shuffle(this->train_x.begin(), this->train_x.end(), g);
+            std::shuffle(this->train_y.begin(), this->train_y.end(), g);
+            */
             for(auto i=0; i<this->batch_size; i++)
             {
                 temp_x.push_back(this->train_x[(this->train_idx + i) % this->train_x.size()]);
@@ -106,11 +140,18 @@ class Dataset
         }
         else if(mode == DEV)
         {
+            /*
+            std::random_device rd;
+            std::mt19937 g(rd());
+            std::shuffle(this->dev_x.begin(), this->dev_x.end(), g);
+            std::shuffle(this->dev_y.begin(), this->dev_y.end(), g);
+            */
             for(auto i=0; i<this->batch_size; i++)
             {
                 temp_x.push_back(this->dev_x[(this->dev_idx + i) % this->dev_x.size()]);
                 temp_y.push_back(this->dev_y[(this->dev_idx + i) % this->dev_y.size()]);
             }
+
             this->_dev_x = tensor(temp_x, std::vector<int>{this->batch_size, (int) temp_x[0].size()});
             this->_dev_y = tensor(temp_y, std::vector<int>{this->batch_size, 1});
 
@@ -124,6 +165,7 @@ class Dataset
                 temp_x.push_back(this->test_x[(this->test_idx + i) % this->test_x.size()]);
                 temp_y.push_back(this->test_y[(this->test_idx + i) % this->test_y.size()]);
             }
+
             this->_test_x = tensor(temp_x, std::vector<int>{this->batch_size, (int) temp_x[0].size()});
             this->_test_y = tensor(temp_y, std::vector<int>{this->batch_size, 1});
 
@@ -240,8 +282,8 @@ class Linear : public Module
 #endif
         this->w = tensor(std::vector<int>{in, out});
         this->b = tensor(std::vector<int>{1, out});
-        w.randomize();
-        b.randomize();
+        w.randomize(in);
+        b.randomize(in);
         this->mod_type = "Linear";
     }
 
@@ -252,7 +294,8 @@ class Linear : public Module
         x.print_shape();
         w.print_shape();
 #endif
-        x = x*this->w + this->b;
+        int b = x.get_shape()[0];
+        x = x*this->w + this->b.extend(b);
         return x;
     }
 
@@ -269,8 +312,23 @@ class Linear : public Module
 
     void update_weights(double l_rate)
     {
+        try
+        {
+            if(this->dLdW.invalid() || this->dLdB.avg().invalid())
+            {
+                throw NAN_INF_VALUES_FOUND;
+            }
+        
+        }
+        catch(FunctionalityErrorTypes x)
+        {
+            std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<FunctionalityErrorType[x]<<std::endl;
+            exit(0);
+        }    
+        
         this->w = this->w - dLdW*l_rate;
         this->b = this->b - dLdB.avg()*l_rate;
+        //this->b = tensor(this->b.get_shape());
     }
 
     std::vector<int> get_dims()
@@ -286,27 +344,29 @@ class ReLu : public Module
 {
     private:
     tensor Z;
+    tensor_double leak_val = 0;
     
     public:
 
-    ReLu()
+    ReLu(tensor_double leak_val)
     {
         this->mod_type = "ReLu";
+        this->leak_val = leak_val;
     }
 
     tensor forward(tensor x)
     {
-        this->Z= x;
-        return x.relu();
+        this->Z = x;
+        return x.relu(this->leak_val);
     }
 
-    tensor backward(tensor A)
+    tensor backward(tensor dLdA)
     {
-        tensor res = tensor(A.get_shape());
+        tensor res = tensor(dLdA.get_shape());
 
         for(int i=0; i<res.elem_count(); i++)
         {
-            res.data[i] = (Z.data[i] > 0) ? (A.data[i]) : (LEAK_RELU_A * A.data[i]);
+            res.data[i] = (Z.data[i] >= 0.0) ? (dLdA.data[i]) : (dLdA.data[i] * this->leak_val);
         }
 
         return res;
@@ -335,23 +395,22 @@ class Tanh : public Module
     {
         tensor res;
         res = tensor(x.get_shape());
-        this->Z = x;
         for(int i=0; i<x.elem_count(); i++)
         {
             res.data[i] = std::tanh(x.data[i]);
         }
-
+        this->Z = res;
         return res;
     }
 
-    tensor backward(tensor A)
+    tensor backward(tensor dLdA)
     {
         tensor res;
         res = tensor(this->Z.get_shape());
 
-        for(int i=0; i<A.elem_count(); i++)
+        for(int i=0; i<dLdA.elem_count(); i++)
         {
-            res.data[i] = A.data[i] * (1 - this->Z.data[i] * this->Z.data[i]);
+            res.data[i] = dLdA.data[i] * (1 - this->Z.data[i] * this->Z.data[i]);
         }
 
         return res;
@@ -384,12 +443,7 @@ class SoftMax : public Module
         for(auto b=0; b<x.get_shape()[0]; b++)
         {
             /* Find the maximum in the tensor*/
-            tensor_double max_elem = x[b][0].val();
-            for(auto i=1; i<x[0].get_elem_count(); i++)
-            {
-                max_elem = x[b][i].val() > max_elem ? x[b][i].val() : max_elem;
-            }
-
+            tensor_double max_elem = x[b].max();
             sum = 0;
             for(auto i=0; i<x[0].get_elem_count(); i++)
             {
@@ -415,7 +469,7 @@ class SoftMax : public Module
         {
             for(int i=0 ;i<res.get_shape()[1]; i++)
             {
-                res[b].data[i] = this->A[b].data[i] * ( 1 - this->A[b].data[i]);
+                res[b].data[i] = A[b].data[i] * ( 1 - A[b].data[i]);
             }
         }
         return A;
@@ -445,6 +499,19 @@ class Network : public Module
     {
         for(auto& mod : this->mod_list)
         {
+            try
+            {
+                if(x.invalid())
+                {
+                    throw NAN_INF_VALUES_FOUND;
+
+                }
+            }
+            catch(FunctionalityErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<FunctionalityErrorType[x]<<std::endl;
+                exit(0);
+            }         
 #ifdef DEBUG_LOGS
             std::cout<<(mod)->get_mod_type()<<std::endl;
 #endif
@@ -455,23 +522,24 @@ class Network : public Module
 
     tensor backward(tensor dLdZ)
     {
-        for(int i=this->mod_list.size()-2; i>=0; i--)
+        for(int i=this->mod_list.size()-1; i>=0; i--)
         {
-#ifdef DEBUG_LOGS
-            std::cout<<(this->mod_list[i])->get_mod_type()<<", is ref: "<<dLdZ.is_reference<<std::endl;
-#endif
             try
             {
-                if(dLdZ.isInf())
+                if(dLdZ.invalid())
                 {
-                    throw TENSOR_VALUES_INF_NAN;
+                    throw NAN_INF_VALUES_FOUND;
+
                 }
             }
             catch(FunctionalityErrorTypes x)
             {
-                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<FunctionalityErrorType[x]<<std::endl;
                 exit(0);
-            }
+            }    
+#ifdef DEBUG_LOGS
+            std::cout<<(this->mod_list[i])->get_mod_type()<<", is ref: "<<dLdZ.is_reference<<std::endl;
+#endif
             dLdZ = (this->mod_list[i])->backward(dLdZ);
         }
         return dLdZ;
@@ -537,7 +605,7 @@ class Network : public Module
         }
     }
 
-    void add_relu()
+    void add_relu(tensor_double leak_val)
     {
         try
         {
@@ -547,7 +615,7 @@ class Network : public Module
             }
             else
             {
-                ReLu* act_fn = new ReLu;
+                ReLu* act_fn = new ReLu(leak_val);
                 this->mod_list.push_back(act_fn);
             }
         }
@@ -590,6 +658,7 @@ class Network : public Module
     }
 };
 
+#ifndef PYTORCH_IMPLEMENTATION_CROSS_ENTROPY
 class cross_entropy_loss
 {
 
@@ -619,6 +688,21 @@ class cross_entropy_loss
 
         for(int b=0; b<batch_size; b++)
         {
+            try
+            {
+                if(y_pred[b][(int) y[b].val()].val() < 0.0)
+                {
+                    std::cout<<"Error Value: "<<y_pred[b][(int) y[b].val()].val()<<std::endl;
+                    throw NEGATIVE_VALUE_FOR_LOG_ERROR;
+                }
+            }
+            
+            catch(FunctionalityErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<FunctionalityErrorType[x]<<std::endl;
+                exit(0);
+            }
+            
             res[b].data[0] = (-1) * std::log(y_pred[b][(int) y[b].val()].val() );
         }
 
@@ -629,9 +713,21 @@ class cross_entropy_loss
         as this would return dLdZ w.r.t Sofrmax Function */
     tensor backward()
     {
-        return this->y - this->y_pred;
+        tensor res = tensor(this->y_pred.get_shape());
+        this->y_pred.print_shape();
+        tensor A = this->NN->get_dAdZ_for_loss(this->y_pred);
+        for(int i=0; i<this->y_pred.get_shape()[0]; i++)
+        {
+            for(int j=0; j<y_pred.get_shape()[1]; j++)
+            {
+                res[i].data[j] = (1 / y_pred[i][j].val()) * A[i][j].val();
+            }
+        }
+
+        return res;
     }
 };
+#endif
 
 class MSE_loss
 {
@@ -697,5 +793,61 @@ class normal_loss
         return this->NN->get_dAdZ_for_loss(this->y_pred);
     }
 };
+
+#ifdef PYTORCH_IMPLEMENTATION_CROSS_ENTROPY
+class CrossEntropy
+{
+    private:
+        tensor y_pred;
+        tensor y;
+        int output_dim;
+    public:
+
+    CrossEntropy(int output_dim)
+    {
+        this->output_dim = output_dim;
+    }
+
+    tensor_double forward(tensor y, tensor y_pred)
+    {
+        tensor logits = tensor(y_pred.get_shape());
+        auto y_encoded = y.one_hot_encoding(this->output_dim);
+        this->y = y_encoded;
+
+        tensor_double res = 0.0;
+        for(int i=0; i<y.get_shape()[0]; i++)
+        {
+            int c = (int) y[i][0].val();
+            tensor_double sum = 0.0;
+            tensor_double max_elem = y_pred[i].max();
+            tensor_double numer = 0.0;
+
+            for(int j=0; j<y_pred[i].get_shape()[0]; j++)
+            {
+                logits[i].data[j] = std::pow(2.71, y_pred[i][j].val() - max_elem);
+                if(c == j)
+                {
+                    numer = logits[i].data[j];
+                }
+                sum += logits[i].data[j];
+            }
+
+            logits[i] = logits[i] / sum;
+
+            res -= std::log(numer/sum);
+            //std::cout<<"End: "<<numer<<", "<<sum<<", "<<res<<std::endl;
+        }
+        this->y_pred = logits;
+
+        return res;
+    }
+
+    tensor backward()
+    {
+        return this->y_pred - this->y;
+    }
+
+};
+#endif
 
 #endif
