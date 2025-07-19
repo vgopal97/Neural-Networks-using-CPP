@@ -1,9 +1,20 @@
 #ifndef TENSOR_H 
 #define TENSOR_H 
 
+#include <vector>
+#include <iostream>
+#include <cstdlib>
+#include <cmath>
+#include <algorithm>
+#include <numeric>
+#include <random>
+#include <thread>
+#include <type_traits>
+
 typedef  long double tensor_double;
 
 #define LEAK_RELU_A  (0.01)
+// Use a reasonable default, but allow runtime adjustment
 #define MAX_THREADS_POSSIBLE (16)
 
 enum TensorErrorTypes
@@ -66,7 +77,7 @@ class tensor
     }
 
         template<typename T>
-        void pop_front(std::vector<T>& vec)
+        void pop_front(std::vector<T>& vec) const
         {
             try
             {
@@ -86,7 +97,7 @@ class tensor
             vec.erase(vec.begin());
         }
 
-        bool shape_equal(std::vector<int>& a, std::vector<int>& b)
+        bool shape_equal(const std::vector<int>& a, const std::vector<int>& b) const
         {
             if(a.size() != b.size())
             {
@@ -104,7 +115,7 @@ class tensor
             return true;
         }
 
-        std::vector<int> calc_dims_for_matmul(std::vector<int>& A, std::vector<int>& B)
+        std::vector<int> calc_dims_for_matmul(const std::vector<int>& A, const std::vector<int>& B) const
         {
             std::vector<int> res;
             int dims = A.size();
@@ -113,7 +124,7 @@ class tensor
             return res;
         }
 #ifdef BROADCAST_ENABLED
-        bool broadcastable(std::vector<int> target, std::vector<int> src)
+        bool broadcastable(const std::vector<int>& target, const std::vector<int>& src) const
         {
             if(target.size() != src.size())
             {
@@ -235,7 +246,7 @@ class tensor
         }
 
         /* Shape Function*/
-        std::vector<int> get_shape()
+        std::vector<int> get_shape() const
         {
             if(this->t_shape.empty())
             {
@@ -244,12 +255,12 @@ class tensor
             return t_shape;
         }
 
-        int get_elem_count()
+        int get_elem_count() const
         {
             return this->num_elems;
         }
 
-        tensor_double val()
+        tensor_double val() const
         {
             try
             {
@@ -271,7 +282,7 @@ class tensor
             return data[0];
         }
 
-        void print_shape()
+        void print_shape() const
         {
             std::cout<<"(";
             for(int i=0; i<this->num_dims; i++)
@@ -282,7 +293,7 @@ class tensor
         }
 
         /* = operator overloading*/
-        void operator=(tensor A)
+        void operator=(const tensor& A)
         {
             if(this->is_reference)
             {
@@ -364,8 +375,31 @@ class tensor
             return sub_tensor;
         } 
 
+        /* Const version of [] Operator overloading*/
+        tensor operator[](int i) const
+        {
+            try
+            {
+                if(i >= t_shape[0])
+                {
+                    throw INDEX_OUT_OF_BOUNDS;
+                }
+            }
+
+            catch(TensorErrorTypes x)
+            {
+                std::cerr<<"File: "<<__FILE__<<", Function: "<<__func__<<", Line: "<<__LINE__<<", ERROR: "<<TensorErrorType[x]<<std::endl;
+                exit(0);
+            }
+                    
+            std::vector<int> sub_tensor_shape = t_shape;
+            pop_front(sub_tensor_shape);
+            tensor sub_tensor(&(data[i*std::accumulate(sub_tensor_shape.begin(), sub_tensor_shape.end(), 1, std::multiplies<int>())]), sub_tensor_shape);
+            return sub_tensor;
+        }
+
         /* + operator overloading*/
-        tensor operator+(tensor A)
+        tensor operator+(const tensor& A) const
         {
             tensor res(t_shape);
 #ifdef BROADCAST_ENABLED
@@ -410,7 +444,7 @@ class tensor
         }
 
         /* - operator overloading*/
-        tensor operator-(tensor A)
+        tensor operator-(const tensor& A) const
         {
             tensor res(t_shape);
 #ifdef BROADCAST_ENABLED
@@ -454,18 +488,18 @@ class tensor
             return res;
         }
 
-        void operator+=(tensor A)
+        void operator+=(const tensor& A)
         {
             (*this) = (*this) + A;
         }
 
-        void operator-=(tensor A)
+        void operator-=(const tensor& A)
         {
             (*this) = (*this) - A;
         }
 
 
-        void mul2D(tensor A, tensor& res, int m, int n)
+        void mul2D(const tensor& A, tensor& res, int m, int n) const
         {
                 for(auto r=m; r<n; r++)
                 {
@@ -485,7 +519,7 @@ class tensor
         }
 
         /* * operator overloading*/
-        tensor operator*(tensor A)
+        tensor operator*(const tensor& A) const
         {
             /* Throw error if the dimesnions are less than 2 and 
                also if both the dimesnions are not compatible*/
@@ -541,7 +575,6 @@ class tensor
                 {
                     th[t].join();
                 }
-
             }
 
             return res;
@@ -570,7 +603,7 @@ class tensor
             return res;
         }
 
-         void operator*=(tensor A)
+         void operator*=(const tensor& A)
         {
             (*this) = (*this) * A;
         }
@@ -596,7 +629,7 @@ class tensor
             return res;
         }
 
-        int elem_count()
+        int elem_count() const
         {
             return this->num_elems;
         }
@@ -656,7 +689,7 @@ class tensor
             return res/dims;
         }
 
-        tensor_double sum()
+        tensor_double sum() const
         {
             tensor_double res = 0;
 
@@ -696,7 +729,7 @@ class tensor
             }
         }
 
-        bool isInf()
+        bool isInf() const
         {
             for(auto i=0; i<this->num_elems; i++)
             {
@@ -738,7 +771,7 @@ class tensor
             return res;
         }
 
-        tensor_double max()
+        tensor_double max() const
         {
             tensor_double max_elem = this->data[0];
 
@@ -749,7 +782,7 @@ class tensor
             return max_elem;
         }
 
-        bool invalid()
+        bool invalid() const
         {
             for(int i=0; i<this->get_elem_count(); i++)
             {
