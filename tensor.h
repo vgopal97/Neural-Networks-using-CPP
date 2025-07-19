@@ -4,6 +4,7 @@
 typedef  long double tensor_double;
 
 #define LEAK_RELU_A  (0.01)
+#define MAX_THREADS_POSSIBLE (16)
 
 enum TensorErrorTypes
 {
@@ -463,6 +464,26 @@ class tensor
             (*this) = (*this) - A;
         }
 
+
+        void mul2D(tensor A, tensor& res, int m, int n)
+        {
+                for(auto r=m; r<n; r++)
+                {
+                    for(auto c=0; c<A.t_shape[1]; c++)
+                    {
+                        res.data[r*res.t_shape[1] + c] = 0;
+                       for(auto k=0; k<this->t_shape[1]; k++)
+                       {
+#ifdef DEBUG_LOGS
+                            //std::cout<<r<<", "<<c<<std::endl;
+                            //std::cout<<r<<", "<<c<<", "<<k<<std::endl;
+#endif
+                            res.data[r*res.t_shape[1] + c] += (*this)[r][k].val() * A[k][c].val();
+                       }
+                    }
+                }
+        }
+
         /* * operator overloading*/
         tensor operator*(tensor A)
         {
@@ -504,22 +525,23 @@ class tensor
             }
             else
             {
-                /* Do the matrix multiplication */
-                for(auto r=0; r<res.t_shape[0]; r++)
+                /* Do the mutithreading part */
+                int threads_called = 0, n = this->get_shape()[0] , work_per_thread = std::ceil((float)(n) / MAX_THREADS_POSSIBLE);
+                std::thread th[MAX_THREADS_POSSIBLE];
+                for(int m=0; m < n - work_per_thread; m += work_per_thread)
                 {
-                    for(auto c=0; c<A.t_shape[1]; c++)
-                    {
-                        res.data[r*res.t_shape[1] + c] = 0;
-                       for(auto k=0; k<this->t_shape[1]; k++)
-                       {
-#ifdef DEBUG_LOGS
-                            //std::cout<<r<<", "<<c<<std::endl;
-                            //std::cout<<r<<", "<<c<<", "<<k<<std::endl;
-#endif
-                            res.data[r*res.t_shape[1] + c] += (*this)[r][k].val() * A[k][c].val();
-                       }
-                    }
+                    th[threads_called++] = std::thread(&tensor::mul2D, this, A, std::ref(res), m, m+work_per_thread);
                 }
+
+                /* Do the matrix multiplication */
+                mul2D(A, res, n-work_per_thread, n);
+
+                /* Join the Threads after the work done*/
+                for(int t=0; t<threads_called; t++)
+                {
+                    th[t].join();
+                }
+
             }
 
             return res;

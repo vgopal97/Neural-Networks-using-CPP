@@ -5,6 +5,7 @@
 #include <numeric>
 #include <string>
 #include <fstream>
+#include<thread>
 
 #define PYTORCH_IMPLEMENTATION_CROSS_ENTROPY
 #include "tensor.h"

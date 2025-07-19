@@ -83,7 +83,6 @@ class Dataset
         this->batch_size = batch_size;
 
         /* Randomize the vectors.*/
-        
         std::random_device rd;
         std::mt19937 g(rd());
         std::mt19937 fx(g());
@@ -98,19 +97,27 @@ class Dataset
 
         std::cout<<"Dataset split : num_train: "<<num_train<<", num_dev: "<<num_dev<<", num_test: "<<this->size-num_train-num_dev<<", total_size: "<<this->size<<std::endl;
 
-        this->train_x = std::vector< std::vector<tensor_double> >(X.begin(), X.begin() + num_train);
-        this->train_y = std::vector<tensor_double>(Y.begin(), Y.begin() + num_train);
-
-        this->dev_x = std::vector< std::vector<tensor_double> >(X.begin() + num_train, X.begin() + num_train + num_dev);
-        this->dev_y = std::vector<tensor_double>(Y.begin() + num_train, Y.begin() + num_train + num_dev);
-
-        this->test_x = std::vector< std::vector<tensor_double> >(X.begin() + num_train + num_dev, X.end());
-        this->test_y = std::vector<tensor_double>(Y.begin() + num_train + num_dev, Y.end());
+        if(split_train)
+        {
+            this->train_x = std::vector< std::vector<tensor_double> >(X.begin(), X.begin() + num_train);
+            this->train_y = std::vector<tensor_double>(Y.begin(), Y.begin() + num_train);
+            this->next(TRAIN);
+        }
         
-        /* Populate the initial tensor values*/
-        this->next(TRAIN);
-        this->next(TEST);
-        this->next(DEV);
+        if(split_dev)
+        {
+            this->dev_x = std::vector< std::vector<tensor_double> >(X.begin() + num_train, X.begin() + num_train + num_dev);
+            this->dev_y = std::vector<tensor_double>(Y.begin() + num_train, Y.begin() + num_train + num_dev);
+            this->next(DEV);
+        }
+
+        if(split_test)
+        {
+            this->test_x = std::vector< std::vector<tensor_double> >(X.begin() + num_train + num_dev, X.end());
+            this->test_y = std::vector<tensor_double>(Y.begin() + num_train + num_dev, Y.end());
+            this->next(TEST);
+        }
+        
     }
 
     int next(int mode)
