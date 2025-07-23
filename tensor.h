@@ -1,16 +1,6 @@
 #ifndef TENSOR_H 
 #define TENSOR_H 
 
-#include <vector>
-#include <iostream>
-#include <cstdlib>
-#include <cmath>
-#include <algorithm>
-#include <numeric>
-#include <random>
-#include <thread>
-#include <type_traits>
-
 typedef  long double tensor_double;
 
 #define LEAK_RELU_A  (0.01)
